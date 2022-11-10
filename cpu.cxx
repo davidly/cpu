@@ -67,7 +67,10 @@ static void HSVToRGB( int h, int s, int v, int &r, int &g, int &b )
 
 int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdShow )
 {
-    SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 );
+    typedef BOOL ( WINAPI *LPFN_SPDAC )( DPI_AWARENESS_CONTEXT );
+    LPFN_SPDAC spdac = (LPFN_SPDAC) GetProcAddress( GetModuleHandleA( "user32" ), "SetProcessDpiAwarenessContext" );
+    if ( spdac )
+        spdac( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 );
 
     SYSTEM_INFO sysInfo;
     GetSystemInfo( &sysInfo );
@@ -115,7 +118,9 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdSho
     if ( NULL == hwnd )
         return 0;
 
-    ShowWindow( hwnd, nCmdShow );
+    // show the window, but don't steal the focus, since nobody wants to type in this app
+
+    ShowWindow( hwnd, /*nCmdShow |*/ SW_SHOWNOACTIVATE );
 
     SetTimer( hwnd, 0, 1000, NULL );
 
@@ -243,3 +248,9 @@ LRESULT CALLBACK WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam 
 
     return DefWindowProc( hwnd, uMsg, wParam, lParam );
 } //WindowProc
+
+// enable building for windows XP with a newer compiler and an older linker by declaring these stubs
+
+extern "C" void __scrt_exe_initialize_mta() {}
+extern "C" void _filter_x86_sse2_floating_point_exception() {}
+
