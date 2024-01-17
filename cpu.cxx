@@ -1,12 +1,17 @@
+// GetSystemTimes() first appeared in Windows XP, so this can't run on earlier versions of Windows.
+
 #ifndef UNICODE
 #define UNICODE
-#endif 
+#endif
 
 #include <windows.h>
 #include <stdio.h>
 #include <math.h>
+#include <assert.h>
 
 #include "djlres.hxx"
+
+typedef unsigned long long u64_t;
 
 #pragma comment(lib, "advapi32.lib")
 
@@ -67,6 +72,7 @@ static void HSVToRGB( int h, int s, int v, int &r, int &g, int &b )
 
 int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdShow )
 {
+    UNREFERENCED_PARAMETER( nCmdShow );
     typedef BOOL ( WINAPI *LPFN_SPDAC )( DPI_AWARENESS_CONTEXT );
     LPFN_SPDAC spdac = (LPFN_SPDAC) GetProcAddress( GetModuleHandleA( "user32" ), "SetProcessDpiAwarenessContext" );
     if ( spdac )
@@ -102,11 +108,11 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdSho
         WCHAR awcPos[ 100 ];
         BOOL fFound = CDJLRegistry::readStringFromRegistry( HKEY_CURRENT_USER, REGISTRY_APP_NAME, REGISTRY_WINDOW_POSITION, awcPos, sizeof( awcPos ) );
         if ( fFound )
-            swscanf( awcPos, L"%d %d", &posLeft, &posTop );
+            swscanf_s( awcPos, L"%d %d", &posLeft, &posTop );
     }
 
     const WCHAR CLASS_NAME[] = L"CPU-davidly-Class";
-    WNDCLASS wc = { };
+    WNDCLASS wc = {0};
     wc.lpfnWndProc   = WindowProc;
     wc.hInstance     = hInstance;
     wc.hCursor       = LoadCursor( NULL, IDC_ARROW );
@@ -124,9 +130,9 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdSho
 
     SetTimer( hwnd, 0, 1000, NULL );
 
-    SetProcessWorkingSetSize( GetCurrentProcess(), ~0, ~0 );
+    SetProcessWorkingSetSize( GetCurrentProcess(), ~ (size_t) 0, ~ (size_t) 0 );
 
-    MSG msg = { };
+    MSG msg = {0};
     while ( GetMessage( &msg, NULL, 0, 0 ) )
     {
         TranslateMessage( &msg );
@@ -136,26 +142,30 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdSho
     return 0;
 } //wWinMain
 
-static float CalculateCPULoad( unsigned long long idleTicks, unsigned long long totalTicks )
+static float CalculateCPULoad( u64_t idleTicks, u64_t totalTicks )
 {
-    static unsigned long long _previousTotalTicks = 0;
-    static unsigned long long _previousIdleTicks = 0;
+    static u64_t _previousTotalTicks = 0;
+    static u64_t _previousIdleTicks = 0;
 
-    unsigned long long totalTicksSinceLastTime = totalTicks - _previousTotalTicks;
-    unsigned long long idleTicksSinceLastTime  = idleTicks - _previousIdleTicks;
+    u64_t totalTicksSinceLastTime = totalTicks - _previousTotalTicks;
+    u64_t idleTicksSinceLastTime  = idleTicks - _previousIdleTicks;
 
     float ret = 1.0f - ( ( totalTicksSinceLastTime > 0 ) ? ( (float) idleTicksSinceLastTime ) / totalTicksSinceLastTime : 0 );
 
     _previousTotalTicks = totalTicks;
     _previousIdleTicks  = idleTicks;
 
+    // it'd be a bug, but make sure
+
+    ret = (float) fabs( ret );
+
     return ret;
 } //CalculateCPULoad
 
-static unsigned long long FileTimeToInt64( const FILETIME & ft )
+static u64_t FileTimeTouint64( const FILETIME & ft )
 {
-    return ( ( (unsigned long long)( ft.dwHighDateTime ) ) << 32 ) | ((unsigned long long) ft.dwLowDateTime );
-} //FileTimeToInt64
+    return ( ( (u64_t) ft.dwHighDateTime ) << 32 ) | ( (u64_t) ft.dwLowDateTime );
+} //FileTimeTouint64
 
 // Returns 1.0f for "CPU fully pinned", 0.0f for "CPU idle", or somewhere in between
 // You'll need to call this at regular intervals, since it measures the load between
@@ -166,7 +176,13 @@ float GetCPULoad()
     FILETIME idleTime, kernelTime, userTime;
 
     if ( GetSystemTimes( &idleTime, &kernelTime, &userTime ) )
-        return CalculateCPULoad( FileTimeToInt64( idleTime ), FileTimeToInt64( kernelTime ) + FileTimeToInt64( userTime ) );
+    {
+        u64_t idleTicks = FileTimeTouint64( idleTime );
+        u64_t kernelTicks = FileTimeTouint64( kernelTime ); // kernel time includes idle time
+        u64_t userTicks = FileTimeTouint64( userTime );
+
+        return CalculateCPULoad( idleTicks, kernelTicks + userTicks );
+    }
 
     return 0.0;
 } //GetCPULoad
@@ -181,7 +197,7 @@ LRESULT CALLBACK WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam 
             GetWindowRect( hwnd, &rectPos );
 
             WCHAR awcPos[ 100 ];
-            int len = swprintf_s( awcPos, _countof( awcPos ), L"%d %d", rectPos.left, rectPos.top );
+            swprintf_s( awcPos, _countof( awcPos ), L"%d %d", rectPos.left, rectPos.top );
             CDJLRegistry::writeStringToRegistry( HKEY_CURRENT_USER, REGISTRY_APP_NAME, REGISTRY_WINDOW_POSITION, awcPos );
 
             PostQuitMessage( 0 );
@@ -209,9 +225,9 @@ LRESULT CALLBACK WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam 
             float load = GetCPULoad();
             COLORREF cr = crRainbow[ (int) round( load * ( _countof( crRainbow ) - 1 ) ) ];
 
-            // 16 for lots of cores some day. 14 WCHARs needed including null terminator: XXX.X% = YY.Y0
+            // 20 for lots of cores some day. 14 WCHARs needed including null terminator: XXX.X% = YY.Y0
 
-            WCHAR awcCPU[ 16 ];
+            WCHAR awcCPU[ 20 ];
             int len = swprintf_s( awcCPU, _countof( awcCPU ), L"%.*f%% = %.*f", 1, 100.0 * load, 1, load * coreCount );
 
             if ( -1 != len )
