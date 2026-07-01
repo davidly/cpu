@@ -159,6 +159,9 @@ static float CalculateCPULoad( u64_t idleTicks, u64_t totalTicks )
 
     ret = (float) fabs( ret );
 
+    if ( ret > 1.0 )
+        ret = 1.0;
+
     return ret;
 } //CalculateCPULoad
 
@@ -223,12 +226,20 @@ LRESULT CALLBACK WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam 
             HDC hdc = BeginPaint( hwnd, &ps );
     
             float load = GetCPULoad();
-            COLORREF cr = crRainbow[ (int) round( load * ( _countof( crRainbow ) - 1 ) ) ];
+            if ( !isfinite( load ) || load < 0.0f )
+                load = 0.0f;
+            else if ( load > 1.0f )
+                load = 1.0f;
+
+            UINT color = (UINT) round( load * ( _countof( crRainbow ) - 1 ) ) ;
+            if ( color >= _countof( crRainbow ) )
+                color = 0;
+            COLORREF cr = crRainbow[ color ];
 
             // 20 for lots of cores some day. 14 WCHARs needed including null terminator: XXX.X% = YY.Y0
 
-            WCHAR awcCPU[ 20 ];
-            int len = swprintf_s( awcCPU, _countof( awcCPU ), L"%.*f%% = %.*f", 1, 100.0 * load, 1, load * coreCount );
+            WCHAR awcCPU[ 32 ]; // paranoid buffer size
+            int len = swprintf_s( awcCPU, _countof( awcCPU ), L"%.1f%% = %.1f", 100.0 * load, load * coreCount );
 
             if ( -1 != len )
             {
